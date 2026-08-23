@@ -17,13 +17,13 @@ echo "==> Installing Python dependencies"
 pip install -r requirements.txt
 
 echo "==> Making scripts executable"
-chmod +x start.sh stop.sh logs.sh debug.sh start-webui.sh stop-webui.sh
+chmod +x bot-start.sh bot-stop.sh bot-logs.sh bot-debug.sh web-start.sh web-stop.sh
 
 echo "==> Setting up boot autostart"
 mkdir -p ~/.termux/boot
 cat > ~/.termux/boot/start-bot.sh <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
-bash "$(pwd)/start.sh"
+bash "$(pwd)/bot-start.sh"
 EOF
 chmod +x ~/.termux/boot/start-bot.sh
 
@@ -33,7 +33,7 @@ termux-wake-lock
 echo ""
 echo "Setup complete."
 echo "1. Copy .env.example to .env and add your BOT_TOKEN."
-echo "2. Start the bot with:   bash start.sh"
-echo "3. Watch live logs with: bash logs.sh"
-echo "4. Stop the bot with:    bash stop.sh"
+echo "2. Start the bot with:   bash bot-start.sh"
+echo "3. Watch live logs with: bash bot-logs.sh"
+echo "4. Stop the bot with:    bash bot-stop.sh"
 echo "5. It will also auto-start on phone reboot via Termux:Boot."

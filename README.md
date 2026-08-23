@@ -76,15 +76,15 @@ below to restrict it to yourself before going further.
 ## 7. Run it
 
 ```bash
-bash start.sh
+bash bot-start.sh
 ```
 
 This starts the bot in the background — it keeps running even if you close
 Termux. You'll see:
 ```
 Bot started in the background.
-View live messages with: bash logs.sh
-Stop it with:            bash stop.sh
+View live messages with: bash bot-logs.sh
+Stop it with:            bash bot-stop.sh
 ```
 
 Then in Telegram, open a chat with your bot and send `/start`, or paste a
@@ -94,13 +94,13 @@ video link directly.
 
 | Action | Command |
 |---|---|
-| Start the bot | `bash start.sh` |
-| Watch live activity/logs | `bash logs.sh` (Ctrl+C stops watching, not the bot) |
-| Stop the bot | `bash stop.sh` |
-| Debug a startup failure | `bash debug.sh` |
+| Start the bot | `bash bot-start.sh` |
+| Watch live activity/logs | `bash bot-logs.sh` (Ctrl+C stops watching, not the bot) |
+| Stop the bot | `bash bot-stop.sh` |
+| Debug a startup failure | `bash bot-debug.sh` |
 
-If `bash start.sh` reports "Bot failed to start", or the bot just doesn't
-seem to respond, run `bash debug.sh` instead — it runs the bot in the
+If `bash bot-start.sh` reports "Bot failed to start", or the bot just doesn't
+seem to respond, run `bash bot-debug.sh` instead — it runs the bot in the
 foreground (not backgrounded) so the actual error is printed directly to
 your screen instead of only going to `bot.log`. Stop it with `Ctrl+C` once
 you've seen the error.
@@ -132,12 +132,12 @@ uploader, and duration as the caption.
 
 ## Optional: web control panel
 
-Instead of typing `start.sh`/`stop.sh`/`logs.sh` in Termux, you can run a
+Instead of typing `bot-start.sh`/`bot-stop.sh`/`bot-logs.sh` in Termux, you can run a
 small web dashboard on your phone with Start/Stop/Restart buttons and a live
 log view:
 
 ```bash
-bash start-webui.sh
+bash web-start.sh
 ```
 
 Then open **http://localhost:8080** in your phone's own browser (Chrome,
@@ -146,7 +146,7 @@ server (Flask) running inside Termux, same as the bot itself.
 
 Stop it with:
 ```bash
-bash stop-webui.sh
+bash web-stop.sh
 ```
 
 **Security note:** by default it only binds to `127.0.0.1`, so only your
@@ -165,14 +165,14 @@ restrict it to yourself (or a few trusted people):
 
 1. Message your own bot with `/id` — it replies with your numeric Telegram
    user ID (e.g. `123456789`)
-2. Stop the bot if it's running: `bash stop.sh`
+2. Stop the bot if it's running: `bash bot-stop.sh`
 3. Edit `.env`:
    ```bash
    nano .env
    ```
 4. Set `ALLOWED_USER_IDS=123456789` (your ID). To allow more people,
    comma-separate their IDs: `ALLOWED_USER_IDS=123456789,987654321`
-5. Save and restart: `bash start.sh`
+5. Save and restart: `bash bot-start.sh`
 
 Anyone whose ID isn't in that list gets "This bot is private." instead of a
 response. Leaving `ALLOWED_USER_IDS` blank allows anyone to use the bot.

@@ -4,7 +4,7 @@
 cd "$(dirname "$0")"
 
 if pgrep -f "python bot.py" > /dev/null; then
-    echo "Bot is already running. Use 'bash stop.sh' first if you want to restart it."
+    echo "Bot is already running. Use 'bash bot-stop.sh' first if you want to restart it."
     exit 1
 fi
 
@@ -17,13 +17,13 @@ sleep 3
 
 if pgrep -f "python bot.py" > /dev/null; then
     echo "Bot started in the background."
-    echo "View live messages with: bash logs.sh"
-    echo "Stop it with:            bash stop.sh"
+    echo "View live messages with: bash bot-logs.sh"
+    echo "Stop it with:            bash bot-stop.sh"
 else
     echo "Bot failed to start. Last log lines:"
     echo "---"
     tail -n 20 bot.log
     echo "---"
-    echo "Run 'bash debug.sh' to see the full error live."
+    echo "Run 'bash bot-debug.sh' to see the full error live."
     exit 1
 fi

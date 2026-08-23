@@ -258,8 +258,8 @@ def set_allowed_ids(ids: list[str]) -> None:
 
 def restart_bot_if_running() -> None:
     if is_running():
-        subprocess.run(["bash", "stop.sh"], cwd=APP_DIR)
-        subprocess.run(["bash", "start.sh"], cwd=APP_DIR)
+        subprocess.run(["bash", "bot-stop.sh"], cwd=APP_DIR)
+        subprocess.run(["bash", "bot-start.sh"], cwd=APP_DIR)
 
 
 @app.route("/")
@@ -278,22 +278,22 @@ def index():
 @app.route("/start", methods=["POST"])
 @requires_auth
 def start():
-    subprocess.run(["bash", "start.sh"], cwd=APP_DIR)
+    subprocess.run(["bash", "bot-start.sh"], cwd=APP_DIR)
     return redirect(url_for("index"))
 
 
 @app.route("/stop", methods=["POST"])
 @requires_auth
 def stop():
-    subprocess.run(["bash", "stop.sh"], cwd=APP_DIR)
+    subprocess.run(["bash", "bot-stop.sh"], cwd=APP_DIR)
     return redirect(url_for("index"))
 
 
 @app.route("/restart", methods=["POST"])
 @requires_auth
 def restart():
-    subprocess.run(["bash", "stop.sh"], cwd=APP_DIR)
-    subprocess.run(["bash", "start.sh"], cwd=APP_DIR)
+    subprocess.run(["bash", "bot-stop.sh"], cwd=APP_DIR)
+    subprocess.run(["bash", "bot-start.sh"], cwd=APP_DIR)
     return redirect(url_for("index"))
 
 

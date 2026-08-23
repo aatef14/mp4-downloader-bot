@@ -5,7 +5,7 @@
 cd "$(dirname "$0")"
 
 if [ ! -f bot.log ]; then
-    echo "No bot.log yet. Start the bot first with: bash start.sh"
+    echo "No bot.log yet. Start the bot first with: bash bot-start.sh"
     exit 1
 fi
 

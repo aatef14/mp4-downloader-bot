@@ -1,13 +1,13 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Runs the bot in the foreground so any startup error is visible immediately.
-# Use this instead of start.sh when the bot isn't starting and you need to
+# Use this instead of bot-start.sh when the bot isn't starting and you need to
 # see why. Ctrl+C stops it.
 
 cd "$(dirname "$0")"
 
 if pgrep -f "python bot.py" > /dev/null; then
-    echo "A background instance is already running (started via start.sh)."
-    echo "Stop it first with: bash stop.sh"
+    echo "A background instance is already running (started via bot-start.sh)."
+    echo "Stop it first with: bash bot-stop.sh"
     exit 1
 fi
 

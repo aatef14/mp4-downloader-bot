@@ -4,7 +4,7 @@
 cd "$(dirname "$0")"
 
 if pgrep -f "python webui.py" > /dev/null; then
-    echo "Web UI is already running. Use 'bash stop-webui.sh' first if you want to restart it."
+    echo "Web UI is already running. Use 'bash web-stop.sh' first if you want to restart it."
     exit 1
 fi
 
@@ -17,7 +17,7 @@ if pgrep -f "python webui.py" > /dev/null; then
     PORT=$(grep -E '^WEBUI_PORT=' .env 2>/dev/null | cut -d= -f2)
     PORT=${PORT:-8080}
     echo "Web UI started. Open http://localhost:$PORT in your phone's browser."
-    echo "Stop it with: bash stop-webui.sh"
+    echo "Stop it with: bash web-stop.sh"
 else
     echo "Web UI failed to start. Last log lines:"
     echo "---"
