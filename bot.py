@@ -9,9 +9,10 @@ import uuid
 
 import yt_dlp
 from dotenv import load_dotenv
-from telegram import BotCommand, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -31,6 +32,7 @@ MAX_LOG_SIZE_MB = int(os.environ.get("MAX_LOG_SIZE_MB", "20"))
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log")
 CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 STALE_TEMP_DIR_AGE_SECONDS = 60 * 60
+PENDING_URL_MAX_AGE_SECONDS = 30 * 60
 
 # yt-dlp itself supports 1000+ sites, so we don't restrict which links are
 # accepted — we just try to recognize the domain for a friendly label and
@@ -48,11 +50,29 @@ PLATFORM_LABELS = [
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
+VIDEO_QUALITIES = [
+    ("best", "Best available"),
+    ("1080", "1080p"),
+    ("720", "720p"),
+    ("480", "480p"),
+    ("360", "360p"),
+]
+AUDIO_QUALITIES = [
+    ("320", "320 kbps"),
+    ("192", "192 kbps"),
+    ("128", "128 kbps"),
+]
+
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger("mp4-downloader-bot")
+
+# Telegram callback_data is capped at 64 bytes, too short for most URLs, so
+# button presses carry a short id that looks the URL up here instead.
+# Each value is (url, created_at) so stale entries can be swept.
+PENDING_URLS: dict[str, tuple[str, float]] = {}
 
 
 def detect_platform(url: str) -> str:
@@ -62,16 +82,60 @@ def detect_platform(url: str) -> str:
     return "link"
 
 
-def build_ydl_opts(out_path: str, url: str) -> dict:
+def remember_url(url: str) -> str:
+    req_id = uuid.uuid4().hex[:12]
+    PENDING_URLS[req_id] = (url, time.time())
+    return req_id
+
+
+def format_keyboard(req_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🎬 MP4 (video)", callback_data=f"fmt:{req_id}:mp4"),
+                InlineKeyboardButton("🎵 MP3 (audio)", callback_data=f"fmt:{req_id}:mp3"),
+            ]
+        ]
+    )
+
+
+def quality_keyboard(req_id: str, fmt: str) -> InlineKeyboardMarkup:
+    options = VIDEO_QUALITIES if fmt == "mp4" else AUDIO_QUALITIES
+    row = [
+        InlineKeyboardButton(label, callback_data=f"dl:{req_id}:{fmt}:{value}")
+        for value, label in options
+    ]
+    # Two buttons per row so it fits on a phone screen.
+    rows = [row[i : i + 2] for i in range(0, len(row), 2)]
+    return InlineKeyboardMarkup(rows)
+
+
+def build_ydl_opts(out_path: str, url: str, fmt: str, quality: str) -> dict:
     opts = {
         "outtmpl": out_path,
-        "format": f"bestvideo[ext=mp4][filesize<{MAX_FILE_SIZE_MB}M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<{MAX_FILE_SIZE_MB}M]/best",
-        "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "max_filesize": MAX_FILE_SIZE_MB * 1024 * 1024,
     }
+
+    if fmt == "mp3":
+        opts["format"] = "bestaudio/best"
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": quality,
+            }
+        ]
+    else:
+        height_filter = f"[height<={quality}]" if quality != "best" else ""
+        opts["format"] = (
+            f"bestvideo{height_filter}[ext=mp4]+bestaudio[ext=m4a]"
+            f"/best{height_filter}[ext=mp4]/best{height_filter}/best"
+        )
+        opts["merge_output_format"] = "mp4"
+
     if "instagram.com" in url and INSTAGRAM_COOKIES_FILE:
         opts["cookiefile"] = INSTAGRAM_COOKIES_FILE
     return opts
@@ -88,17 +152,33 @@ def format_duration(seconds) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def find_output_file(work_dir: str) -> str | None:
+    """yt-dlp's postprocessors (e.g. mp3 extraction) can change the final
+    extension, so instead of guessing the path we just find the one real
+    output file it left behind."""
+    candidates = [
+        f
+        for f in os.listdir(work_dir)
+        if not f.endswith((".part", ".ytdl", ".description", ".json"))
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda f: os.path.getsize(os.path.join(work_dir, f)), reverse=True)
+    return os.path.join(work_dir, candidates[0])
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "Send me a video link from YouTube, YouTube Shorts, Instagram, TikTok, "
-        "X/Twitter, Facebook, or Reddit and I'll send back the mp4.\n\n"
+        "X/Twitter, Facebook, or Reddit. I'll ask whether you want MP4 or MP3 "
+        "and what quality, then send the file back.\n\n"
         f"Max file size: {MAX_FILE_SIZE_MB}MB (Telegram Bot API limit)."
     )
 
 
-async def process_url(url: str, status, reply_target) -> None:
-    """Download url, editing status messages along the way, and send the
-    result via reply_target.reply_video."""
+async def process_download(url: str, fmt: str, quality: str, status, reply_target) -> None:
+    """Download url as fmt/quality, editing status messages along the way,
+    and send the result via reply_target.reply_video/reply_audio."""
     platform = detect_platform(url)
     await status.edit_text(f"Detected: {platform}\nDownloading...")
 
@@ -106,24 +186,20 @@ async def process_url(url: str, status, reply_target) -> None:
     out_template = os.path.join(work_dir, f"{uuid.uuid4().hex}.%(ext)s")
 
     try:
-        ydl_opts = build_ydl_opts(out_template, url)
+        ydl_opts = build_ydl_opts(out_template, url, fmt, quality)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-            if not file_path.endswith(".mp4"):
-                mp4_path = os.path.splitext(file_path)[0] + ".mp4"
-                if os.path.exists(mp4_path):
-                    file_path = mp4_path
 
-        if not os.path.exists(file_path):
+        file_path = find_output_file(work_dir)
+        if not file_path:
             await status.edit_text("Download failed: no output file produced.")
             return
 
         size_mb = os.path.getsize(file_path) / (1024 * 1024)
         if size_mb > MAX_FILE_SIZE_MB:
             await status.edit_text(
-                f"Video is {size_mb:.1f}MB, over the {MAX_FILE_SIZE_MB}MB Telegram limit. "
-                "Run a local Bot API server to raise this to 2GB."
+                f"File is {size_mb:.1f}MB, over the {MAX_FILE_SIZE_MB}MB Telegram limit. "
+                "Try a lower quality, or run a local Bot API server to raise this to 2GB."
             )
             return
 
@@ -135,7 +211,10 @@ async def process_url(url: str, status, reply_target) -> None:
 
         await status.edit_text(f"Detected: {platform}\nUploading...")
         with open(file_path, "rb") as f:
-            await reply_target.reply_video(video=f, caption=caption, supports_streaming=True)
+            if fmt == "mp3":
+                await reply_target.reply_audio(audio=f, caption=caption, title=title or None)
+            else:
+                await reply_target.reply_video(video=f, caption=caption, supports_streaming=True)
         await status.delete()
 
     except yt_dlp.utils.DownloadError as e:
@@ -145,15 +224,7 @@ async def process_url(url: str, status, reply_target) -> None:
         logger.exception("Unexpected error handling %s", url)
         await status.edit_text("Something went wrong processing that link.")
     finally:
-        for fname in os.listdir(work_dir):
-            try:
-                os.remove(os.path.join(work_dir, fname))
-            except OSError:
-                pass
-        try:
-            os.rmdir(work_dir)
-        except OSError:
-            pass
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -174,8 +245,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     url = match.group(0)
-    status = await message.reply_text("Working on it...")
-    await process_url(url, status, message)
+    req_id = remember_url(url)
+    platform = detect_platform(url)
+    await message.reply_text(
+        f"Detected: {platform}\nChoose a format:",
+        reply_markup=format_keyboard(req_id),
+    )
+
+
+async def handle_format_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
+        await query.edit_message_text("This bot is private.")
+        return
+
+    _, req_id, fmt = query.data.split(":")
+    entry = PENDING_URLS.get(req_id)
+    if not entry:
+        await query.edit_message_text("This link expired, please send it again.")
+        return
+
+    await query.edit_message_text("Choose a quality:", reply_markup=quality_keyboard(req_id, fmt))
+
+
+async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
+        await query.edit_message_text("This bot is private.")
+        return
+
+    _, req_id, fmt, quality = query.data.split(":")
+    entry = PENDING_URLS.pop(req_id, None)
+    if not entry:
+        await query.edit_message_text("This link expired, please send it again.")
+        return
+
+    url, _ = entry
+    status = query.message
+    await process_download(url, fmt, quality, status, status)
 
 
 def cleanup_temp_files() -> int:
@@ -202,6 +313,14 @@ def cleanup_temp_files() -> int:
     return removed
 
 
+def cleanup_pending_urls() -> int:
+    now = time.time()
+    stale = [rid for rid, (_, created) in PENDING_URLS.items() if now - created > PENDING_URL_MAX_AGE_SECONDS]
+    for rid in stale:
+        PENDING_URLS.pop(rid, None)
+    return len(stale)
+
+
 def rotate_log_if_large() -> None:
     try:
         if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > MAX_LOG_SIZE_MB * 1024 * 1024:
@@ -213,6 +332,7 @@ def rotate_log_if_large() -> None:
 
 async def daily_cleanup(context: ContextTypes.DEFAULT_TYPE) -> None:
     removed = cleanup_temp_files()
+    cleanup_pending_urls()
     rotate_log_if_large()
     if removed:
         logger.info("Daily cleanup removed %d stale temp dir(s)", removed)
@@ -234,10 +354,11 @@ async def set_bot_info(app: Application) -> None:
     )
     description = (
         "Send a YouTube, YouTube Shorts, Instagram, TikTok, X/Twitter, "
-        "Facebook, or Reddit video link and get the mp4 back."
+        "Facebook, or Reddit video link, pick MP4 or MP3 and a quality, "
+        "and get the file back."
     )
     await app.bot.set_my_description(description)
-    await app.bot.set_my_short_description("Video link to mp4 downloader")
+    await app.bot.set_my_short_description("Video/audio link downloader")
 
 
 def main() -> None:
@@ -248,6 +369,8 @@ def main() -> None:
 
     app = Application.builder().token(BOT_TOKEN).post_init(set_bot_info).build()
     app.add_handler(CommandHandler(["start", "help"], start_command))
+    app.add_handler(CallbackQueryHandler(handle_format_choice, pattern=r"^fmt:"))
+    app.add_handler(CallbackQueryHandler(handle_quality_choice, pattern=r"^dl:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(error_handler)
     app.job_queue.run_repeating(daily_cleanup, interval=CLEANUP_INTERVAL_SECONDS, first=60)
