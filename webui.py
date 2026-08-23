@@ -2,13 +2,14 @@ import os
 import subprocess
 from functools import wraps
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv, set_key
 from flask import Flask, Response, redirect, render_template_string, request, url_for
 
 load_dotenv()
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(APP_DIR, "bot.log")
+ENV_PATH = os.path.join(APP_DIR, ".env")
 
 WEBUI_HOST = os.environ.get("WEBUI_HOST", "127.0.0.1")
 WEBUI_PORT = int(os.environ.get("WEBUI_PORT", "8080"))
@@ -18,33 +19,194 @@ app = Flask(__name__)
 
 PAGE = """
 <!doctype html>
-<title>mp4-downloader-bot control panel</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mp4-downloader-bot</title>
 <style>
-  body { font-family: sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
-  .status { padding: .5rem 1rem; border-radius: 6px; display: inline-block; margin-bottom: 1rem; font-weight: bold; }
-  .running { background: #d4f7d4; color: #146614; }
-  .stopped { background: #f7d4d4; color: #661414; }
-  button { padding: .6rem 1.2rem; margin: 0 .5rem .5rem 0; font-size: 1rem; }
-  pre { background: #111; color: #ddd; padding: 1rem; overflow-x: auto; max-height: 400px; white-space: pre-wrap; word-break: break-word; }
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --card-border: #262a35;
+    --text: #e6e8ec;
+    --muted: #8b93a7;
+    --accent: #4f8cff;
+    --accent-hover: #3d75e0;
+    --green: #35c471;
+    --green-bg: rgba(53, 196, 113, .12);
+    --red: #ff5c5c;
+    --red-bg: rgba(255, 92, 92, .12);
+    --amber: #f5b942;
+    --amber-bg: rgba(245, 185, 66, .12);
+    --blue-bg: rgba(79, 140, 255, .12);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+    line-height: 1.5;
+  }
+  h1 {
+    font-size: 1.4rem;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: 1.25rem;
+  }
+  h3 {
+    font-size: .95rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--muted);
+    margin: 1.75rem 0 .75rem;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .badge {
+    padding: .35rem .8rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    font-weight: 600;
+    font-size: .85rem;
+  }
+  .badge.running { background: var(--green-bg); color: var(--green); }
+  .badge.stopped { background: var(--red-bg); color: var(--red); }
+  .dot { width: .5rem; height: .5rem; border-radius: 50%; background: currentColor; }
+  .banner {
+    padding: .7rem 1rem;
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    font-size: .9rem;
+  }
+  .banner.warning { background: var(--amber-bg); color: var(--amber); }
+  .banner.info { background: var(--blue-bg); color: var(--accent); }
+  .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .9rem; }
+  button {
+    appearance: none;
+    border: none;
+    border-radius: 10px;
+    padding: .65rem 1.1rem;
+    font-size: .92rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: #232733;
+    color: var(--text);
+    transition: background .15s ease;
+  }
+  button:hover:not(:disabled) { background: #2c313f; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.danger { background: var(--red-bg); color: var(--red); }
+  button.danger:hover:not(:disabled) { background: rgba(255, 92, 92, .22); }
+  button.small { padding: .4rem .8rem; font-size: .8rem; }
+  form.inline { display: inline; }
+  .add-form { display: flex; gap: .5rem; margin-top: .5rem; }
+  input[type=text] {
+    flex: 1;
+    padding: .6rem .8rem;
+    border-radius: 10px;
+    border: 1px solid var(--card-border);
+    background: #10131a;
+    color: var(--text);
+    font-size: .95rem;
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); }
+  ul.whitelist { list-style: none; padding: 0; margin: 0; }
+  ul.whitelist li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: .55rem 0;
+    border-bottom: 1px solid var(--card-border);
+    font-variant-numeric: tabular-nums;
+  }
+  ul.whitelist li:last-child { border-bottom: none; }
+  .hint { color: var(--muted); font-size: .8rem; margin-top: .6rem; }
+  pre {
+    background: #0a0c10;
+    color: #c7ccd8;
+    padding: 1rem;
+    border-radius: var(--radius);
+    overflow-x: auto;
+    max-height: 360px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: .78rem;
+    border: 1px solid var(--card-border);
+    margin: 0;
+  }
 </style>
-<h1>mp4-downloader-bot</h1>
-<p class="status {{ 'running' if running else 'stopped' }}">
-  Status: {{ 'RUNNING' if running else 'STOPPED' }}
-</p>
-<form method="post" action="{{ url_for('start') }}" style="display:inline">
-  <button type="submit" {{ 'disabled' if running else '' }}>Start</button>
-</form>
-<form method="post" action="{{ url_for('stop') }}" style="display:inline">
-  <button type="submit" {{ '' if running else 'disabled' }}>Stop</button>
-</form>
-<form method="post" action="{{ url_for('restart') }}" style="display:inline">
-  <button type="submit">Restart</button>
-</form>
-<form method="get" action="{{ url_for('index') }}" style="display:inline">
-  <button type="submit">Refresh</button>
-</form>
-<h3>Last log lines</h3>
+</head>
+<body>
+
+<h1>🎬 mp4-downloader-bot</h1>
+
+{% if message %}<div class="banner info">{{ message }}</div>{% endif %}
+
+<div class="card">
+  <span class="badge {{ 'running' if running else 'stopped' }}">
+    <span class="dot"></span>{{ 'RUNNING' if running else 'STOPPED' }}
+  </span>
+  <div class="actions">
+    <form class="inline" method="post" action="{{ url_for('start') }}">
+      <button class="primary" type="submit" {{ 'disabled' if running else '' }}>▶ Start</button>
+    </form>
+    <form class="inline" method="post" action="{{ url_for('stop') }}">
+      <button class="danger" type="submit" {{ '' if running else 'disabled' }}>■ Stop</button>
+    </form>
+    <form class="inline" method="post" action="{{ url_for('restart') }}">
+      <button type="submit">⟳ Restart</button>
+    </form>
+    <form class="inline" method="get" action="{{ url_for('index') }}">
+      <button type="submit">↻ Refresh</button>
+    </form>
+  </div>
+</div>
+
+<h3>Whitelist</h3>
+<div class="card">
+  {% if allowed_ids %}
+  <ul class="whitelist">
+    {% for uid in allowed_ids %}
+    <li>
+      <span>{{ uid }}</span>
+      <form class="inline" method="post" action="{{ url_for('whitelist_remove') }}">
+        <input type="hidden" name="user_id" value="{{ uid }}">
+        <button class="small danger" type="submit">Remove</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="banner warning">Whitelist is empty — anyone can use the bot.</div>
+  {% endif %}
+  <form class="add-form" method="post" action="{{ url_for('whitelist_add') }}">
+    <input type="text" name="user_id" placeholder="Telegram user ID" inputmode="numeric">
+    <button class="primary" type="submit">Add</button>
+  </form>
+  <p class="hint">Get an ID by having the person send /id to the bot. Changes restart the bot automatically.</p>
+</div>
+
+<h3>Live Log</h3>
 <pre>{{ log_tail }}</pre>
+
+</body>
+</html>
 """
 
 
@@ -84,10 +246,33 @@ def tail_log(lines: int = 50) -> str:
         return "".join(f.readlines()[-lines:]) or "(empty)"
 
 
+def get_allowed_ids() -> list[str]:
+    values = dotenv_values(ENV_PATH)
+    raw = (values.get("ALLOWED_USER_IDS") or "").strip()
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def set_allowed_ids(ids: list[str]) -> None:
+    set_key(ENV_PATH, "ALLOWED_USER_IDS", ",".join(ids), quote_mode="never")
+
+
+def restart_bot_if_running() -> None:
+    if is_running():
+        subprocess.run(["bash", "stop.sh"], cwd=APP_DIR)
+        subprocess.run(["bash", "start.sh"], cwd=APP_DIR)
+
+
 @app.route("/")
 @requires_auth
 def index():
-    return render_template_string(PAGE, running=is_running(), log_tail=tail_log())
+    message = request.args.get("message")
+    return render_template_string(
+        PAGE,
+        running=is_running(),
+        log_tail=tail_log(),
+        allowed_ids=get_allowed_ids(),
+        message=message,
+    )
 
 
 @app.route("/start", methods=["POST"])
@@ -109,6 +294,36 @@ def stop():
 def restart():
     subprocess.run(["bash", "stop.sh"], cwd=APP_DIR)
     subprocess.run(["bash", "start.sh"], cwd=APP_DIR)
+    return redirect(url_for("index"))
+
+
+@app.route("/whitelist/add", methods=["POST"])
+@requires_auth
+def whitelist_add():
+    new_id = request.form.get("user_id", "").strip()
+    if not new_id.isdigit():
+        return redirect(url_for("index", message=f"'{new_id}' is not a valid numeric Telegram ID."))
+
+    ids = get_allowed_ids()
+    if new_id in ids:
+        return redirect(url_for("index", message=f"{new_id} is already whitelisted."))
+
+    ids.append(new_id)
+    set_allowed_ids(ids)
+    restart_bot_if_running()
+    return redirect(url_for("index", message=f"Added {new_id}. Bot restarted to apply."))
+
+
+@app.route("/whitelist/remove", methods=["POST"])
+@requires_auth
+def whitelist_remove():
+    remove_id = request.form.get("user_id", "").strip()
+    ids = get_allowed_ids()
+    if remove_id in ids:
+        ids.remove(remove_id)
+        set_allowed_ids(ids)
+        restart_bot_if_running()
+        return redirect(url_for("index", message=f"Removed {remove_id}. Bot restarted to apply."))
     return redirect(url_for("index"))
 
 
