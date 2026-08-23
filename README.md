@@ -90,13 +90,20 @@ Stop it with:            bash stop.sh
 Then in Telegram, open a chat with your bot and send `/start`, or paste a
 video link directly.
 
-**Managing the bot going forward, three commands:**
+**Managing the bot going forward:**
 
 | Action | Command |
 |---|---|
 | Start the bot | `bash start.sh` |
 | Watch live activity/logs | `bash logs.sh` (Ctrl+C stops watching, not the bot) |
 | Stop the bot | `bash stop.sh` |
+| Debug a startup failure | `bash debug.sh` |
+
+If `bash start.sh` reports "Bot failed to start", or the bot just doesn't
+seem to respond, run `bash debug.sh` instead — it runs the bot in the
+foreground (not backgrounded) so the actual error is printed directly to
+your screen instead of only going to `bot.log`. Stop it with `Ctrl+C` once
+you've seen the error.
 
 Reboot your phone once after setup — Termux:Boot will auto-start the bot
 from then on, so it comes back automatically after a restart or crash.

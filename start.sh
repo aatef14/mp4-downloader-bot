@@ -13,6 +13,17 @@ termux-wake-lock
 nohup python bot.py >> bot.log 2>&1 &
 disown
 
-echo "Bot started in the background."
-echo "View live messages with: bash logs.sh"
-echo "Stop it with:            bash stop.sh"
+sleep 3
+
+if pgrep -f "python bot.py" > /dev/null; then
+    echo "Bot started in the background."
+    echo "View live messages with: bash logs.sh"
+    echo "Stop it with:            bash stop.sh"
+else
+    echo "Bot failed to start. Last log lines:"
+    echo "---"
+    tail -n 20 bot.log
+    echo "---"
+    echo "Run 'bash debug.sh' to see the full error live."
+    exit 1
+fi
