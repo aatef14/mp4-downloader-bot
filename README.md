@@ -130,6 +130,33 @@ uploader, and duration as the caption.
 
 ---
 
+## Optional: web control panel
+
+Instead of typing `start.sh`/`stop.sh`/`logs.sh` in Termux, you can run a
+small web dashboard on your phone with Start/Stop/Restart buttons and a live
+log view:
+
+```bash
+bash start-webui.sh
+```
+
+Then open **http://localhost:8080** in your phone's own browser (Chrome,
+Firefox, whatever). It's not a separate app — it's a small Python web
+server (Flask) running inside Termux, same as the bot itself.
+
+Stop it with:
+```bash
+bash stop-webui.sh
+```
+
+**Security note:** by default it only binds to `127.0.0.1`, so only your
+phone's own browser can reach it. If you set `WEBUI_HOST=0.0.0.0` in `.env`
+to access it from another device on the same WiFi (e.g. a laptop), you
+**must** also set `WEBUI_PASSWORD` — otherwise anyone on your network could
+start/stop your bot.
+
+---
+
 ## Whitelisting: restricting who can use the bot
 
 Telegram bots are public by default — anyone who finds the username can

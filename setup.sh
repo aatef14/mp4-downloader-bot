@@ -16,8 +16,8 @@ termux-setup-storage
 echo "==> Installing Python dependencies"
 pip install -r requirements.txt
 
-echo "==> Making start/stop/logs scripts executable"
-chmod +x start.sh stop.sh logs.sh debug.sh
+echo "==> Making scripts executable"
+chmod +x start.sh stop.sh logs.sh debug.sh start-webui.sh stop-webui.sh
 
 echo "==> Setting up boot autostart"
 mkdir -p ~/.termux/boot
