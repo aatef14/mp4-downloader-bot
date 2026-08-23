@@ -7,8 +7,15 @@ import uuid
 
 import yt_dlp
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 load_dotenv()
 
@@ -40,6 +47,10 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger("mp4-downloader-bot")
+
+# Telegram callback_data is capped at 64 bytes, too short for most URLs, so
+# retry buttons carry a short id that looks this dict up instead of the URL.
+PENDING_URLS: dict[str, str] = {}
 
 
 def detect_platform(url: str) -> str:
@@ -75,12 +86,87 @@ def format_duration(seconds) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+def retry_keyboard(url: str) -> InlineKeyboardMarkup:
+    req_id = uuid.uuid4().hex[:12]
+    PENDING_URLS[req_id] = url
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Retry", callback_data=f"retry:{req_id}")]])
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "Send me a video link from YouTube, YouTube Shorts, Instagram, TikTok, "
         "X/Twitter, Facebook, or Reddit and I'll send back the mp4.\n\n"
         f"Max file size: {MAX_FILE_SIZE_MB}MB (Telegram Bot API limit)."
     )
+
+
+async def process_url(url: str, status, reply_target) -> None:
+    """Download url, editing status messages along the way, and send the
+    result (or a retry button on failure) via reply_target.reply_video/text."""
+    platform = detect_platform(url)
+    await status.edit_text(f"Detected: {platform}\nDownloading...")
+
+    work_dir = tempfile.mkdtemp(prefix="mp4bot_")
+    out_template = os.path.join(work_dir, f"{uuid.uuid4().hex}.%(ext)s")
+
+    try:
+        ydl_opts = build_ydl_opts(out_template, url)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
+            if not file_path.endswith(".mp4"):
+                mp4_path = os.path.splitext(file_path)[0] + ".mp4"
+                if os.path.exists(mp4_path):
+                    file_path = mp4_path
+
+        if not os.path.exists(file_path):
+            await status.edit_text(
+                "Download failed: no output file produced.",
+                reply_markup=retry_keyboard(url),
+            )
+            return
+
+        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if size_mb > MAX_FILE_SIZE_MB:
+            await status.edit_text(
+                f"Video is {size_mb:.1f}MB, over the {MAX_FILE_SIZE_MB}MB Telegram limit. "
+                "Run a local Bot API server to raise this to 2GB."
+            )
+            return
+
+        title = info.get("title") or ""
+        duration = format_duration(info.get("duration"))
+        uploader = info.get("uploader") or ""
+        caption_parts = [p for p in [title, uploader, duration] if p]
+        caption = "\n".join(caption_parts)[:1024] or None
+
+        await status.edit_text(f"Detected: {platform}\nUploading...")
+        with open(file_path, "rb") as f:
+            await reply_target.reply_video(video=f, caption=caption, supports_streaming=True)
+        await status.delete()
+
+    except yt_dlp.utils.DownloadError as e:
+        logger.warning("Download error for %s: %s", url, e)
+        await status.edit_text(
+            f"Couldn't download that link: {e}",
+            reply_markup=retry_keyboard(url),
+        )
+    except Exception:
+        logger.exception("Unexpected error handling %s", url)
+        await status.edit_text(
+            "Something went wrong processing that link.",
+            reply_markup=retry_keyboard(url),
+        )
+    finally:
+        for fname in os.listdir(work_dir):
+            try:
+                os.remove(os.path.join(work_dir, fname))
+            except OSError:
+                pass
+        try:
+            os.rmdir(work_dir)
+        except OSError:
+            pass
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -101,61 +187,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     url = match.group(0)
-    platform = detect_platform(url)
-    status = await message.reply_text(f"Detected: {platform}\nDownloading...")
+    status = await message.reply_text("Working on it...")
+    await process_url(url, status, message)
 
-    work_dir = tempfile.mkdtemp(prefix="mp4bot_")
-    out_template = os.path.join(work_dir, f"{uuid.uuid4().hex}.%(ext)s")
 
-    try:
-        ydl_opts = build_ydl_opts(out_template, url)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-            if not file_path.endswith(".mp4"):
-                mp4_path = os.path.splitext(file_path)[0] + ".mp4"
-                if os.path.exists(mp4_path):
-                    file_path = mp4_path
+async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
 
-        if not os.path.exists(file_path):
-            await status.edit_text("Download failed: no output file produced.")
-            return
+    if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
+        await query.edit_message_text("This bot is private.")
+        return
 
-        size_mb = os.path.getsize(file_path) / (1024 * 1024)
-        if size_mb > MAX_FILE_SIZE_MB:
-            await status.edit_text(
-                f"Video is {size_mb:.1f}MB, over the {MAX_FILE_SIZE_MB}MB Telegram limit. "
-                "Run a local Bot API server to raise this to 2GB."
-            )
-            return
+    req_id = query.data.split(":", 1)[1]
+    url = PENDING_URLS.pop(req_id, None)
+    if not url:
+        await query.edit_message_text("This retry link expired, send the URL again.")
+        return
 
-        title = info.get("title") or ""
-        duration = format_duration(info.get("duration"))
-        uploader = info.get("uploader") or ""
-        caption_parts = [p for p in [title, uploader, duration] if p]
-        caption = "\n".join(caption_parts)[:1024] or None
+    status = query.message
+    await process_url(url, status, status)
 
-        await status.edit_text(f"Detected: {platform}\nUploading...")
-        with open(file_path, "rb") as f:
-            await message.reply_video(video=f, caption=caption, supports_streaming=True)
-        await status.delete()
 
-    except yt_dlp.utils.DownloadError as e:
-        logger.warning("Download error for %s: %s", url, e)
-        await status.edit_text(f"Couldn't download that link: {e}")
-    except Exception:
-        logger.exception("Unexpected error handling %s", url)
-        await status.edit_text("Something went wrong processing that link.")
-    finally:
-        for fname in os.listdir(work_dir):
-            try:
-                os.remove(os.path.join(work_dir, fname))
-            except OSError:
-                pass
-        try:
-            os.rmdir(work_dir)
-        except OSError:
-            pass
+async def set_bot_info(app: Application) -> None:
+    await app.bot.set_my_commands(
+        [
+            BotCommand("start", "Show usage instructions"),
+            BotCommand("help", "Show usage instructions"),
+        ]
+    )
+    description = (
+        "Send a YouTube, YouTube Shorts, Instagram, TikTok, X/Twitter, "
+        "Facebook, or Reddit video link and get the mp4 back."
+    )
+    await app.bot.set_my_description(description)
+    await app.bot.set_my_short_description("Video link to mp4 downloader")
 
 
 def main() -> None:
@@ -164,8 +230,9 @@ def main() -> None:
     # https://github.com/python-telegram-bot/python-telegram-bot/issues/4874
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(set_bot_info).build()
     app.add_handler(CommandHandler(["start", "help"], start_command))
+    app.add_handler(CallbackQueryHandler(handle_retry, pattern=r"^retry:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
