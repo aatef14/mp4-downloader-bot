@@ -130,11 +130,11 @@ uploader, and duration as the caption.
 
 ---
 
-## Optional: web control panel
+## Optional: Admin View (web control panel)
 
-Instead of typing `bot-start.sh`/`bot-stop.sh`/`bot-logs.sh` in Termux, you can run a
-small web dashboard on your phone with Start/Stop/Restart buttons and a live
-log view:
+Instead of typing `bot-start.sh`/`bot-stop.sh`/`bot-logs.sh` in Termux, you can run
+**Admin View** — a small web dashboard on your phone with Start/Stop/Restart
+buttons, whitelist management, and a live log view:
 
 ```bash
 bash web-start.sh
@@ -163,19 +163,26 @@ Telegram bots are public by default — anyone who finds the username can
 message it and use your phone's bandwidth/battery to download videos. To
 restrict it to yourself (or a few trusted people):
 
-1. Message your own bot with `/id` — it replies with your numeric Telegram
-   user ID (e.g. `123456789`)
-2. Stop the bot if it's running: `bash bot-stop.sh`
-3. Edit `.env`:
-   ```bash
-   nano .env
-   ```
-4. Set `ALLOWED_USER_IDS=123456789` (your ID). To allow more people,
-   comma-separate their IDs: `ALLOWED_USER_IDS=123456789,987654321`
-5. Save and restart: `bash bot-start.sh`
+1. Have the person message your bot with `/id` — it replies with their
+   numeric Telegram user ID (e.g. `123456789`) and their username
+2. They send you that ID
+3. Open **Admin View** (`bash web-start.sh`, then `http://localhost:8080`)
+   and add it under **Whitelist** — type the ID, optionally a name to
+   label it (e.g. "Atif"), and tap **Add**. The bot restarts automatically
+   to apply it.
+
+Prefer the terminal? You can edit `.env` directly instead:
+```bash
+nano .env
+```
+Set `ALLOWED_USER_IDS=123456789` (your ID), optionally with a name:
+`ALLOWED_USER_IDS=123456789:Atif`. Comma-separate more entries:
+`ALLOWED_USER_IDS=123456789:Atif,987654321:Sam`. Then restart:
+`bash bot-stop.sh && bash bot-start.sh`
 
 Anyone whose ID isn't in that list gets "This bot is private." instead of a
-response. Leaving `ALLOWED_USER_IDS` blank allows anyone to use the bot.
+response, with instructions to send `/id` and pass it to you. Leaving
+`ALLOWED_USER_IDS` blank allows anyone to use the bot.
 
 ---
 

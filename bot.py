@@ -25,8 +25,17 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 INSTAGRAM_COOKIES_FILE = os.environ.get("INSTAGRAM_COOKIES_FILE") or None
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 
+def _parse_allowed_user_ids(raw: str):
+    # Entries are "id" or "id:Name" (the name is just a label for the admin
+    # web UI and is ignored here).
+    entries = [e.strip() for e in raw.split(",") if e.strip()]
+    if not entries:
+        return None
+    return {int(e.split(":", 1)[0]) for e in entries}
+
+
 _allowed_raw = os.environ.get("ALLOWED_USER_IDS", "").strip()
-ALLOWED_USER_IDS = {int(uid) for uid in _allowed_raw.split(",") if uid.strip()} if _allowed_raw else None
+ALLOWED_USER_IDS = _parse_allowed_user_ids(_allowed_raw)
 
 MAX_LOG_SIZE_MB = int(os.environ.get("MAX_LOG_SIZE_MB", "20"))
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log")

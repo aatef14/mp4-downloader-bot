@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from functools import wraps
 
 from dotenv import dotenv_values, load_dotenv, set_key
@@ -23,7 +24,7 @@ PAGE = """
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mp4-downloader-bot</title>
+<title>Admin View</title>
 <style>
   :root {
     --bg: #0f1115;
@@ -114,7 +115,9 @@ PAGE = """
   button.danger:hover:not(:disabled) { background: rgba(255, 92, 92, .22); }
   button.small { padding: .4rem .8rem; font-size: .8rem; }
   form.inline { display: inline; }
-  .add-form { display: flex; gap: .5rem; margin-top: .5rem; }
+  .add-form { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+  .add-form input[type=text] { min-width: 140px; }
+  .uid-muted { color: var(--muted); font-weight: 400; font-size: .85rem; }
   input[type=text] {
     flex: 1;
     padding: .6rem .8rem;
@@ -154,7 +157,7 @@ PAGE = """
 </head>
 <body>
 
-<h1>🎬 mp4-downloader-bot</h1>
+<h1>🛠️ Admin View</h1>
 
 {% if message %}<div class="banner info">{{ message }}</div>{% endif %}
 
@@ -180,11 +183,11 @@ PAGE = """
 
 <h3>Whitelist</h3>
 <div class="card">
-  {% if allowed_ids %}
+  {% if allowed_entries %}
   <ul class="whitelist">
-    {% for uid in allowed_ids %}
+    {% for uid, name in allowed_entries %}
     <li>
-      <span>{{ uid }}</span>
+      <span>{% if name %}{{ name }} <span class="uid-muted">({{ uid }})</span>{% else %}{{ uid }}{% endif %}</span>
       <form class="inline" method="post" action="{{ url_for('whitelist_remove') }}">
         <input type="hidden" name="user_id" value="{{ uid }}">
         <button class="small danger" type="submit">Remove</button>
@@ -197,6 +200,7 @@ PAGE = """
   {% endif %}
   <form class="add-form" method="post" action="{{ url_for('whitelist_add') }}">
     <input type="text" name="user_id" placeholder="Telegram user ID" inputmode="numeric">
+    <input type="text" name="name" placeholder="Name (optional)">
     <button class="primary" type="submit">Add</button>
   </form>
   <p class="hint">Get an ID by having the person send /id to the bot. Changes restart the bot automatically.</p>
@@ -246,20 +250,32 @@ def tail_log(lines: int = 50) -> str:
         return "".join(f.readlines()[-lines:]) or "(empty)"
 
 
-def get_allowed_ids() -> list[str]:
+def get_allowed_entries() -> list[tuple[str, str]]:
+    """Returns [(user_id, name)] parsed from ALLOWED_USER_IDS, which stores
+    entries as either "id" or "id:Name" (name is optional, comma-separated)."""
     values = dotenv_values(ENV_PATH)
     raw = (values.get("ALLOWED_USER_IDS") or "").strip()
-    return [x.strip() for x in raw.split(",") if x.strip()]
+    entries = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        uid, _, name = part.partition(":")
+        entries.append((uid.strip(), name.strip()))
+    return entries
 
 
-def set_allowed_ids(ids: list[str]) -> None:
-    set_key(ENV_PATH, "ALLOWED_USER_IDS", ",".join(ids), quote_mode="never")
+def set_allowed_entries(entries: list[tuple[str, str]]) -> None:
+    parts = [f"{uid}:{name}" if name else uid for uid, name in entries]
+    set_key(ENV_PATH, "ALLOWED_USER_IDS", ",".join(parts), quote_mode="never")
 
 
-def restart_bot_if_running() -> None:
-    if is_running():
-        subprocess.run(["bash", "bot-stop.sh"], cwd=APP_DIR)
-        subprocess.run(["bash", "bot-start.sh"], cwd=APP_DIR)
+def restart_bot(only_if_running: bool = False) -> None:
+    if only_if_running and not is_running():
+        return
+    subprocess.run(["bash", "bot-stop.sh"], cwd=APP_DIR)
+    time.sleep(1)
+    subprocess.run(["bash", "bot-start.sh"], cwd=APP_DIR)
 
 
 @app.route("/")
@@ -270,7 +286,7 @@ def index():
         PAGE,
         running=is_running(),
         log_tail=tail_log(),
-        allowed_ids=get_allowed_ids(),
+        allowed_entries=get_allowed_entries(),
         message=message,
     )
 
@@ -292,8 +308,7 @@ def stop():
 @app.route("/restart", methods=["POST"])
 @requires_auth
 def restart():
-    subprocess.run(["bash", "bot-stop.sh"], cwd=APP_DIR)
-    subprocess.run(["bash", "bot-start.sh"], cwd=APP_DIR)
+    restart_bot()
     return redirect(url_for("index"))
 
 
@@ -301,28 +316,30 @@ def restart():
 @requires_auth
 def whitelist_add():
     new_id = request.form.get("user_id", "").strip()
+    name = request.form.get("name", "").strip()
     if not new_id.isdigit():
         return redirect(url_for("index", message=f"'{new_id}' is not a valid numeric Telegram ID."))
 
-    ids = get_allowed_ids()
-    if new_id in ids:
+    entries = get_allowed_entries()
+    if any(uid == new_id for uid, _ in entries):
         return redirect(url_for("index", message=f"{new_id} is already whitelisted."))
 
-    ids.append(new_id)
-    set_allowed_ids(ids)
-    restart_bot_if_running()
-    return redirect(url_for("index", message=f"Added {new_id}. Bot restarted to apply."))
+    entries.append((new_id, name))
+    set_allowed_entries(entries)
+    restart_bot(only_if_running=True)
+    label = f"{new_id} ({name})" if name else new_id
+    return redirect(url_for("index", message=f"Added {label}. Bot restarted to apply."))
 
 
 @app.route("/whitelist/remove", methods=["POST"])
 @requires_auth
 def whitelist_remove():
     remove_id = request.form.get("user_id", "").strip()
-    ids = get_allowed_ids()
-    if remove_id in ids:
-        ids.remove(remove_id)
-        set_allowed_ids(ids)
-        restart_bot_if_running()
+    entries = get_allowed_entries()
+    remaining = [(uid, name) for uid, name in entries if uid != remove_id]
+    if len(remaining) != len(entries):
+        set_allowed_entries(remaining)
+        restart_bot(only_if_running=True)
         return redirect(url_for("index", message=f"Removed {remove_id}. Bot restarted to apply."))
     return redirect(url_for("index"))
 
