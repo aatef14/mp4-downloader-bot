@@ -2,15 +2,16 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import tempfile
+import time
 import uuid
 
 import yt_dlp
 from dotenv import load_dotenv
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, Update
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -25,6 +26,11 @@ MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 
 _allowed_raw = os.environ.get("ALLOWED_USER_IDS", "").strip()
 ALLOWED_USER_IDS = {int(uid) for uid in _allowed_raw.split(",") if uid.strip()} if _allowed_raw else None
+
+MAX_LOG_SIZE_MB = int(os.environ.get("MAX_LOG_SIZE_MB", "20"))
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.log")
+CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
+STALE_TEMP_DIR_AGE_SECONDS = 60 * 60
 
 # yt-dlp itself supports 1000+ sites, so we don't restrict which links are
 # accepted — we just try to recognize the domain for a friendly label and
@@ -47,10 +53,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger("mp4-downloader-bot")
-
-# Telegram callback_data is capped at 64 bytes, too short for most URLs, so
-# retry buttons carry a short id that looks this dict up instead of the URL.
-PENDING_URLS: dict[str, str] = {}
 
 
 def detect_platform(url: str) -> str:
@@ -86,12 +88,6 @@ def format_duration(seconds) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def retry_keyboard(url: str) -> InlineKeyboardMarkup:
-    req_id = uuid.uuid4().hex[:12]
-    PENDING_URLS[req_id] = url
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Retry", callback_data=f"retry:{req_id}")]])
-
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "Send me a video link from YouTube, YouTube Shorts, Instagram, TikTok, "
@@ -102,7 +98,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def process_url(url: str, status, reply_target) -> None:
     """Download url, editing status messages along the way, and send the
-    result (or a retry button on failure) via reply_target.reply_video/text."""
+    result via reply_target.reply_video."""
     platform = detect_platform(url)
     await status.edit_text(f"Detected: {platform}\nDownloading...")
 
@@ -120,10 +116,7 @@ async def process_url(url: str, status, reply_target) -> None:
                     file_path = mp4_path
 
         if not os.path.exists(file_path):
-            await status.edit_text(
-                "Download failed: no output file produced.",
-                reply_markup=retry_keyboard(url),
-            )
+            await status.edit_text("Download failed: no output file produced.")
             return
 
         size_mb = os.path.getsize(file_path) / (1024 * 1024)
@@ -147,16 +140,10 @@ async def process_url(url: str, status, reply_target) -> None:
 
     except yt_dlp.utils.DownloadError as e:
         logger.warning("Download error for %s: %s", url, e)
-        await status.edit_text(
-            f"Couldn't download that link: {e}",
-            reply_markup=retry_keyboard(url),
-        )
+        await status.edit_text(f"Couldn't download that link: {e}")
     except Exception:
         logger.exception("Unexpected error handling %s", url)
-        await status.edit_text(
-            "Something went wrong processing that link.",
-            reply_markup=retry_keyboard(url),
-        )
+        await status.edit_text("Something went wrong processing that link.")
     finally:
         for fname in os.listdir(work_dir):
             try:
@@ -191,22 +178,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await process_url(url, status, message)
 
 
-async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
+def cleanup_temp_files() -> int:
+    """Remove leftover mp4bot_* temp dirs (normally cleaned up per-download,
+    but a crash mid-download can strand one). Returns count removed."""
+    removed = 0
+    tmp_root = tempfile.gettempdir()
+    now = time.time()
+    try:
+        entries = os.listdir(tmp_root)
+    except OSError:
+        return 0
+    for name in entries:
+        if not name.startswith("mp4bot_"):
+            continue
+        path = os.path.join(tmp_root, name)
+        try:
+            if now - os.path.getmtime(path) < STALE_TEMP_DIR_AGE_SECONDS:
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
-    if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
-        await query.edit_message_text("This bot is private.")
-        return
 
-    req_id = query.data.split(":", 1)[1]
-    url = PENDING_URLS.pop(req_id, None)
-    if not url:
-        await query.edit_message_text("This retry link expired, send the URL again.")
-        return
+def rotate_log_if_large() -> None:
+    try:
+        if os.path.exists(LOG_PATH) and os.path.getsize(LOG_PATH) > MAX_LOG_SIZE_MB * 1024 * 1024:
+            open(LOG_PATH, "w").close()
+            logger.info("Truncated bot.log after exceeding %sMB", MAX_LOG_SIZE_MB)
+    except OSError:
+        pass
 
-    status = query.message
-    await process_url(url, status, status)
+
+async def daily_cleanup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    removed = cleanup_temp_files()
+    rotate_log_if_large()
+    if removed:
+        logger.info("Daily cleanup removed %d stale temp dir(s)", removed)
 
 
 async def set_bot_info(app: Application) -> None:
@@ -232,8 +241,9 @@ def main() -> None:
 
     app = Application.builder().token(BOT_TOKEN).post_init(set_bot_info).build()
     app.add_handler(CommandHandler(["start", "help"], start_command))
-    app.add_handler(CallbackQueryHandler(handle_retry, pattern=r"^retry:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.job_queue.run_repeating(daily_cleanup, interval=CLEANUP_INTERVAL_SECONDS, first=60)
+    cleanup_temp_files()
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
