@@ -25,12 +25,22 @@ phone via Termux instead of a rented server.
    cp .env.example .env
    nano .env
    ```
-6. Start the bot manually the first time to confirm it works:
+6. Start the bot in the background:
    ```bash
-   python bot.py
+   bash start.sh
    ```
-7. Reboot the phone once — Termux:Boot will auto-start the bot from then on
-   (see `~/.termux/boot/start-bot.sh`, created by `setup.sh`).
+7. Watch live activity anytime with:
+   ```bash
+   bash logs.sh
+   ```
+   (`Ctrl+C` only stops watching — the bot keeps running.)
+8. Stop the bot with:
+   ```bash
+   bash stop.sh
+   ```
+9. Reboot the phone once — Termux:Boot will auto-start the bot from then on
+   (see `~/.termux/boot/start-bot.sh`, created by `setup.sh`, which just
+   calls `start.sh`).
 
 ## Notes
 
