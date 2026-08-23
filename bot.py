@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -108,6 +109,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 def main() -> None:
+    # Python 3.14 dropped asyncio.get_event_loop()'s auto-create behavior,
+    # which python-telegram-bot's run_polling() still relies on internally.
+    # https://github.com/python-telegram-bot/python-telegram-bot/issues/4874
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Bot starting...")
