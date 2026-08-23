@@ -218,6 +218,13 @@ async def daily_cleanup(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("Daily cleanup removed %d stale temp dir(s)", removed)
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Network blips during polling (phone briefly losing signal/WiFi) are
+    # normal and self-recovering, so log them as a one-liner instead of a
+    # full traceback that makes it look like the bot crashed.
+    logger.warning("Update handling error: %s", context.error)
+
+
 async def set_bot_info(app: Application) -> None:
     await app.bot.set_my_commands(
         [
@@ -242,6 +249,7 @@ def main() -> None:
     app = Application.builder().token(BOT_TOKEN).post_init(set_bot_info).build()
     app.add_handler(CommandHandler(["start", "help"], start_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_error_handler(error_handler)
     app.job_queue.run_repeating(daily_cleanup, interval=CLEANUP_INTERVAL_SECONDS, first=60)
     cleanup_temp_files()
     logger.info("Bot starting...")
