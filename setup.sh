@@ -14,7 +14,6 @@ echo "==> Enabling storage access (approve the Android permission prompt)"
 termux-setup-storage
 
 echo "==> Installing Python dependencies"
-pip install --upgrade pip
 pip install -r requirements.txt
 
 echo "==> Setting up boot autostart"
