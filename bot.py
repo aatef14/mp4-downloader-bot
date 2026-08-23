@@ -50,6 +50,12 @@ PLATFORM_LABELS = [
 
 URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
+PRIVATE_MESSAGE = (
+    "This bot is private.\n\n"
+    "Send /id to get your Telegram user ID, then send that ID to the bot "
+    "owner and ask them to add it to ALLOWED_USER_IDS."
+)
+
 VIDEO_QUALITIES = [
     ("best", "Best available"),
     ("1080", "1080p"),
@@ -240,7 +246,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     message = update.effective_message
 
     if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
-        await message.reply_text("This bot is private.")
+        await message.reply_text(PRIVATE_MESSAGE)
         return
 
     text = message.text or ""
@@ -267,7 +273,7 @@ async def handle_format_choice(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
 
     if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
-        await query.edit_message_text("This bot is private.")
+        await query.edit_message_text(PRIVATE_MESSAGE)
         return
 
     _, req_id, fmt = query.data.split(":")
@@ -284,7 +290,7 @@ async def handle_quality_choice(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
-        await query.edit_message_text("This bot is private.")
+        await query.edit_message_text(PRIVATE_MESSAGE)
         return
 
     _, req_id, fmt, quality = query.data.split(":")
