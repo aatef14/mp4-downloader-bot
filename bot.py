@@ -8,8 +8,7 @@ import uuid
 import yt_dlp
 from dotenv import load_dotenv
 from telegram import Update
-from telegram.constants import ParseMode
-from telegram.ext import Application, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 load_dotenv()
 
@@ -20,18 +19,34 @@ MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 _allowed_raw = os.environ.get("ALLOWED_USER_IDS", "").strip()
 ALLOWED_USER_IDS = {int(uid) for uid in _allowed_raw.split(",") if uid.strip()} if _allowed_raw else None
 
-URL_RE = re.compile(
-    r"https?://(?:www\.)?"
-    r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/|instagram\.com/(?:reel|p|tv)/)"
-    r"[^\s]+",
-    re.IGNORECASE,
-)
+# yt-dlp itself supports 1000+ sites, so we don't restrict which links are
+# accepted — we just try to recognize the domain for a friendly label and
+# let yt-dlp fail gracefully on anything it can't actually handle.
+PLATFORM_LABELS = [
+    (re.compile(r"(youtube\.com/shorts/)", re.IGNORECASE), "YouTube Shorts"),
+    (re.compile(r"(youtube\.com|youtu\.be)", re.IGNORECASE), "YouTube"),
+    (re.compile(r"instagram\.com/reel", re.IGNORECASE), "Instagram Reel"),
+    (re.compile(r"instagram\.com", re.IGNORECASE), "Instagram"),
+    (re.compile(r"tiktok\.com", re.IGNORECASE), "TikTok"),
+    (re.compile(r"(twitter\.com|x\.com)", re.IGNORECASE), "X / Twitter"),
+    (re.compile(r"facebook\.com|fb\.watch", re.IGNORECASE), "Facebook"),
+    (re.compile(r"reddit\.com", re.IGNORECASE), "Reddit"),
+]
+
+URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger("mp4-downloader-bot")
+
+
+def detect_platform(url: str) -> str:
+    for pattern, label in PLATFORM_LABELS:
+        if pattern.search(url):
+            return label
+    return "link"
 
 
 def build_ydl_opts(out_path: str, url: str) -> dict:
@@ -49,6 +64,25 @@ def build_ydl_opts(out_path: str, url: str) -> dict:
     return opts
 
 
+def format_duration(seconds) -> str:
+    if not seconds:
+        return ""
+    seconds = int(seconds)
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(
+        "Send me a video link from YouTube, YouTube Shorts, Instagram, TikTok, "
+        "X/Twitter, Facebook, or Reddit and I'll send back the mp4.\n\n"
+        f"Max file size: {MAX_FILE_SIZE_MB}MB (Telegram Bot API limit)."
+    )
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
 
@@ -61,12 +95,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if not match:
         await message.reply_text(
-            "Send me a YouTube, YouTube Shorts, or Instagram video/reel link."
+            "Send me a YouTube, YouTube Shorts, Instagram, TikTok, X/Twitter, "
+            "Facebook, or Reddit video link."
         )
         return
 
     url = match.group(0)
-    status = await message.reply_text("Downloading...")
+    platform = detect_platform(url)
+    status = await message.reply_text(f"Detected: {platform}\nDownloading...")
 
     work_dir = tempfile.mkdtemp(prefix="mp4bot_")
     out_template = os.path.join(work_dir, f"{uuid.uuid4().hex}.%(ext)s")
@@ -93,9 +129,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             return
 
-        await status.edit_text("Uploading...")
+        title = info.get("title") or ""
+        duration = format_duration(info.get("duration"))
+        uploader = info.get("uploader") or ""
+        caption_parts = [p for p in [title, uploader, duration] if p]
+        caption = "\n".join(caption_parts)[:1024] or None
+
+        await status.edit_text(f"Detected: {platform}\nUploading...")
         with open(file_path, "rb") as f:
-            await message.reply_video(video=f, supports_streaming=True)
+            await message.reply_video(video=f, caption=caption, supports_streaming=True)
         await status.delete()
 
     except yt_dlp.utils.DownloadError as e:
@@ -123,6 +165,7 @@ def main() -> None:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
     app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler(["start", "help"], start_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
