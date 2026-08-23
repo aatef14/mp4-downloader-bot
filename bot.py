@@ -176,6 +176,15 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    lines = [f"Your Telegram user ID: {user.id}"]
+    if user.username:
+        lines.append(f"Username: @{user.username}")
+    lines.append("\nAdd this ID to ALLOWED_USER_IDS in .env to whitelist yourself.")
+    await update.effective_message.reply_text("\n".join(lines))
+
+
 async def process_download(url: str, fmt: str, quality: str, status, reply_target) -> None:
     """Download url as fmt/quality, editing status messages along the way,
     and send the result via reply_target.reply_video/reply_audio."""
@@ -350,6 +359,7 @@ async def set_bot_info(app: Application) -> None:
         [
             BotCommand("start", "Show usage instructions"),
             BotCommand("help", "Show usage instructions"),
+            BotCommand("id", "Show your Telegram user ID"),
         ]
     )
     description = (
@@ -369,6 +379,7 @@ def main() -> None:
 
     app = Application.builder().token(BOT_TOKEN).post_init(set_bot_info).build()
     app.add_handler(CommandHandler(["start", "help"], start_command))
+    app.add_handler(CommandHandler("id", id_command))
     app.add_handler(CallbackQueryHandler(handle_format_choice, pattern=r"^fmt:"))
     app.add_handler(CallbackQueryHandler(handle_quality_choice, pattern=r"^dl:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

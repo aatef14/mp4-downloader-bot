@@ -129,8 +129,8 @@ Telegram bots are public by default — anyone who finds the username can
 message it and use your phone's bandwidth/battery to download videos. To
 restrict it to yourself (or a few trusted people):
 
-1. Message **[@userinfobot](https://t.me/userinfobot)** on Telegram — it
-   replies with your numeric Telegram user ID (e.g. `123456789`)
+1. Message your own bot with `/id` — it replies with your numeric Telegram
+   user ID (e.g. `123456789`)
 2. Stop the bot if it's running: `bash stop.sh`
 3. Edit `.env`:
    ```bash
