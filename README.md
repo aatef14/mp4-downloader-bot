@@ -1,4 +1,4 @@
-# mp4-downloader-bot
+# Link2video
 
 A Telegram bot that takes a YouTube, YouTube Shorts, Instagram, TikTok,
 X/Twitter, Facebook, or Reddit video link and sends back the file as MP4
@@ -37,11 +37,15 @@ the bot. Do this once:
 
 1. In Telegram, search for **@BotFather** (the official one, verified checkmark)
 2. Send it `/newbot`
-3. Give it a display name (anything), then a username ending in `bot`
-   (e.g. `my_video_downloader_bot`)
+3. Give it a display name — e.g. `Link2video` — then a username ending in
+   `bot` (e.g. `link2video_bot`)
 4. BotFather replies with a token like `7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxx`
    — copy it, you'll need it in step 5. **Keep it private** — anyone with it
    can control your bot.
+
+The bot also sets its own display name to "Link2video" automatically on
+startup via the Telegram API, so it'll show that name even if you picked
+something else with BotFather.
 
 ## 4. Clone and set up the bot
 
@@ -130,10 +134,10 @@ uploader, and duration as the caption.
 
 ---
 
-## Optional: Admin View (web control panel)
+## Optional: Link2video Admin Portal (web control panel)
 
 Instead of typing `bot-start.sh`/`bot-stop.sh`/`bot-logs.sh` in Termux, you can run
-**Admin View** — a small web dashboard on your phone with Start/Stop/Restart
+**Link2video Admin Portal** — a small web dashboard on your phone with Start/Stop/Restart
 buttons, whitelist management, and a live log view:
 
 ```bash
@@ -166,7 +170,7 @@ restrict it to yourself (or a few trusted people):
 1. Have the person message your bot with `/id` — it replies with their
    numeric Telegram user ID (e.g. `123456789`) and their username
 2. They send you that ID
-3. Open **Admin View** (`bash web-start.sh`, then `http://localhost:8080`)
+3. Open **Link2video Admin Portal** (`bash web-start.sh`, then `http://localhost:8080`)
    and add it under **Whitelist** — type the ID, optionally a name to
    label it (e.g. "Atif"), and tap **Add**. The bot restarts automatically
    to apply it.

@@ -184,6 +184,7 @@ def find_output_file(work_dir: str) -> str | None:
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
+        "Link2video\n\n"
         "Send me a video link from YouTube, YouTube Shorts, Instagram, TikTok, "
         "X/Twitter, Facebook, or Reddit. I'll ask whether you want MP4 or MP3 "
         "and what quality, then send the file back.\n\n"
@@ -377,13 +378,14 @@ async def set_bot_info(app: Application) -> None:
             BotCommand("id", "Show your Telegram user ID"),
         ]
     )
+    await app.bot.set_my_name("Link2video")
     description = (
-        "Send a YouTube, YouTube Shorts, Instagram, TikTok, X/Twitter, "
-        "Facebook, or Reddit video link, pick MP4 or MP3 and a quality, "
-        "and get the file back."
+        "Link2video: send a YouTube, YouTube Shorts, Instagram, TikTok, "
+        "X/Twitter, Facebook, or Reddit video link, pick MP4 or MP3 and a "
+        "quality, and get the file back."
     )
     await app.bot.set_my_description(description)
-    await app.bot.set_my_short_description("Video/audio link downloader")
+    await app.bot.set_my_short_description("Link2video: video/audio link downloader")
 
 
 def main() -> None:

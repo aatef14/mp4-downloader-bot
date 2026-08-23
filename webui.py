@@ -24,7 +24,7 @@ PAGE = """
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin View</title>
+<title>Link2video | Admin Portal</title>
 <style>
   :root {
     --bg: #0f1115;
@@ -157,7 +157,7 @@ PAGE = """
 </head>
 <body>
 
-<h1>🛠️ Admin View</h1>
+<h1>🛠️ Link2video | Admin Portal</h1>
 
 {% if message %}<div class="banner info">{{ message }}</div>{% endif %}
 
@@ -222,7 +222,7 @@ def authenticate() -> Response:
     return Response(
         "Authentication required.",
         401,
-        {"WWW-Authenticate": 'Basic realm="mp4-downloader-bot"'},
+        {"WWW-Authenticate": 'Basic realm="Link2video Admin Portal"'},
     )
 
 
