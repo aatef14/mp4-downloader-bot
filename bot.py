@@ -17,6 +17,9 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 INSTAGRAM_COOKIES_FILE = os.environ.get("INSTAGRAM_COOKIES_FILE") or None
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 
+_allowed_raw = os.environ.get("ALLOWED_USER_IDS", "").strip()
+ALLOWED_USER_IDS = {int(uid) for uid in _allowed_raw.split(",") if uid.strip()} if _allowed_raw else None
+
 URL_RE = re.compile(
     r"https?://(?:www\.)?"
     r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/|instagram\.com/(?:reel|p|tv)/)"
@@ -48,6 +51,11 @@ def build_ydl_opts(out_path: str, url: str) -> dict:
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
+
+    if ALLOWED_USER_IDS is not None and update.effective_user.id not in ALLOWED_USER_IDS:
+        await message.reply_text("This bot is private.")
+        return
+
     text = message.text or ""
     match = URL_RE.search(text)
 
